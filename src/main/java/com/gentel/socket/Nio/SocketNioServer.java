@@ -46,7 +46,6 @@ public class SocketNioServer {
 
         private Selector selector;
         private ServerSocketChannel serverSocketChannel;
-        private List<Channel> channels;
 
         public ServerNioHandler(Selector selector, ServerSocketChannel serverSocketChannel) {
             this.selector = selector;
@@ -75,18 +74,33 @@ public class SocketNioServer {
                     Iterator iterator = selectionKeys.iterator();
 
                     while (iterator.hasNext()) {
-
                         /**
                          * 获取selectionKey实例
                          */
                         SelectionKey selectionKey = (SelectionKey) iterator.next();
 
-                        channels.add(selectionKey.channel());
+                        /**
+                         * 获取数据后移除当前selectkey防止重复调用
+                         */
+                        iterator.remove();
 
                         /**
                          * 根据就绪状态调用对应的业务处理逻辑
                          */
-                        new Thread(new ClientHandler(serverSocketChannel, selector, selectionKey)).start();
+
+                        /**
+                         * 接入事件  --考虑后续改造接入事件使用线程池
+                         */
+                        if (selectionKey.isAcceptable()) {
+                            acceptHandler(serverSocketChannel, selector);
+                        }
+
+                        /**
+                         * 可读事件  --考虑后续改造可读事件使用线程池
+                         */
+                        if (selectionKey.isReadable()) {
+                            readHandler(selectionKey, selector);
+                        }
 
                     }
 
@@ -96,43 +110,6 @@ public class SocketNioServer {
             }
         }
 
-        class ClientHandler implements Runnable{
-            ServerSocketChannel serverSocketChannel;
-            Selector selector;
-            SelectionKey selectionKey;
-
-            public ClientHandler(ServerSocketChannel serverSocketChannel, Selector selector, SelectionKey selectionKey) {
-                this.serverSocketChannel = serverSocketChannel;
-                this.selector = selector;
-                this.selectionKey = selectionKey;
-            }
-
-
-            @Override
-            public void run() {
-                /**
-                 * 接入事件
-                 */
-                if (selectionKey.isAcceptable()) {
-                    try {
-                        acceptHandler(serverSocketChannel, selector);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-
-
-                /**
-                 *  可读事件
-                 */if (selectionKey.isReadable()) {
-                    try {
-                        readHandler(selectionKey, selector);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-        }
         /**
          * 接入事件处理方法
          */
@@ -143,7 +120,7 @@ public class SocketNioServer {
             SocketChannel socketChannel = serverSocketChannel.accept();
 
             /**
-             * 将SocketChannel设置为为阻塞工作模式
+             * 将SocketChannel设置为非阻塞工作模式
              */
             socketChannel.configureBlocking(false);
 
@@ -156,6 +133,7 @@ public class SocketNioServer {
              * 通知客户端信息
              */
             socketChannel.write(Charset.forName("UTF-8").encode("hello i am server"));
+            System.out.println("Get connect:"+socketChannel.getRemoteAddress());
         }
 
         /**
@@ -175,14 +153,14 @@ public class SocketNioServer {
             /**
              * 循环读取客户端请求的内容
              */
-            String result = null;
+            String result = "";
             while (socketChannel.read(byteBuffer) > 0) {
                 /**
                  * 切换BYTEBUF为读模式
                  */
                 byteBuffer.flip();
 
-                result += byteBuffer.toString();
+                result += Charset.forName("UTF-8").decode(byteBuffer);
             }
 
             /**
@@ -193,7 +171,8 @@ public class SocketNioServer {
             /**
              * 回复客户端接收到信息
              */
-            socketChannel.write(Charset.forName("UTF-8").encode("received client" + socketChannel.getRemoteAddress()));
+            socketChannel.write(Charset.forName("UTF-8").encode("received client[" + socketChannel.getRemoteAddress() + "]message:[" + result + "]"));
+            System.out.println("Receive client[" + socketChannel.getRemoteAddress() + "]message:[" + result + "]");
         }
     }
 
